@@ -31,7 +31,7 @@ type DNSClient interface {
 // DockerClient allows us to build our overrides and monitor for container
 // changes.
 type DockerClient interface {
-	StartMonitorEvents(cb dockerclient.Callback, args ...interface{})
+	StartMonitorEvents(dockerclient.Callback, chan error, ...interface{})
 	ListContainers(all bool, size bool, filters string) ([]dockerclient.Container, error)
 	InspectContainer(id string) (*dockerclient.ContainerInfo, error)
 }
@@ -75,7 +75,7 @@ func (a *App) run(nameservers string) error {
 	a.dnsUDPclient = &dns.Client{Net: "udp", SingleInflight: true}
 
 	// monitor first, then rebuild to ensure we dont miss any updates
-	a.docker.StartMonitorEvents(a.onDockerEvent)
+	a.docker.StartMonitorEvents(a.onDockerEvent, make(chan error, 1))
 	if err := a.rebuild(); err != nil {
 		return err
 	}
@@ -134,7 +134,7 @@ func (a *App) rebuild() error {
 	return nil
 }
 
-func (a *App) onDockerEvent(e *dockerclient.Event, args ...interface{}) {
+func (a *App) onDockerEvent(e *dockerclient.Event, errch chan error, args ...interface{}) {
 	go func() {
 		if err := a.rebuild(); err != nil {
 			a.Log.Printf("error rebuilding overrides: %s\n", err)

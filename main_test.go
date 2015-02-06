@@ -16,13 +16,13 @@ import (
 )
 
 type fDockerClient struct {
-	startMonitorEvents func(cb dockerclient.Callback, args ...interface{})
+	startMonitorEvents func(dockerclient.Callback, chan error, ...interface{})
 	listContainers     func(all bool, size bool, filters string) ([]dockerclient.Container, error)
 	inspectContainer   func(id string) (*dockerclient.ContainerInfo, error)
 }
 
-func (f fDockerClient) StartMonitorEvents(cb dockerclient.Callback, args ...interface{}) {
-	f.startMonitorEvents(cb, args...)
+func (f fDockerClient) StartMonitorEvents(cb dockerclient.Callback, errch chan error, args ...interface{}) {
+	f.startMonitorEvents(cb, errch, args...)
 }
 
 func (f fDockerClient) ListContainers(all bool, size bool, filters string) ([]dockerclient.Container, error) {
