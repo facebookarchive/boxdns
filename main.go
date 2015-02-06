@@ -19,6 +19,11 @@ import (
 	"github.com/samalba/dockerclient"
 )
 
+const (
+	qtypeIPv4 = 1
+	qtypeIPv6 = 28
+)
+
 // Overrides specify the custom hostname => IP address our DNS server will
 // override.
 type Overrides map[string]net.IP
@@ -153,27 +158,38 @@ func (a *App) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 
 func (a *App) handleDNSQuery(w dns.ResponseWriter, req *dns.Msg) {
 	// TODO: do we need to handle 1 of many questions and forward the rest?
-	// TODO: ipv6 AAAA records?
 	if len(req.Question) == 1 {
 		o := a.Overrides.Load().(Overrides)
 		q := req.Question[0]
 		if ip := o[q.Name]; ip != nil {
-			res := new(dns.Msg)
-			res.SetReply(req)
-			res.Answer = []dns.RR{
-				&dns.A{
-					A: ip,
-					Hdr: dns.RR_Header{
-						Name:     q.Name,
-						Rrtype:   1,
-						Class:    1,
-						Ttl:      100,
-						Rdlength: 4,
+			switch q.Qtype {
+			default:
+				a.Log.Printf("unhandled Qtype %d for overridden host %q\n", q.Qtype, q.Name)
+			case qtypeIPv4:
+				res := new(dns.Msg)
+				res.SetReply(req)
+				res.RecursionAvailable = true
+				res.Answer = []dns.RR{
+					&dns.A{
+						A: ip,
+						Hdr: dns.RR_Header{
+							Name:     q.Name,
+							Rrtype:   1,
+							Class:    1,
+							Ttl:      100,
+							Rdlength: 4,
+						},
 					},
-				},
+				}
+				w.WriteMsg(res)
+				return
+			case qtypeIPv6:
+				res := new(dns.Msg)
+				res.SetReply(req)
+				res.RecursionAvailable = true
+				w.WriteMsg(res)
+				return
 			}
-			w.WriteMsg(res)
-			return
 		}
 	}
 	a.forwardDNSRequest(w, req)

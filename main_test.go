@@ -209,7 +209,7 @@ func TestServeDNSForwardTryAllAndFail(t *testing.T) {
 	ensure.DeepEqual(t, atomic.LoadInt32(&current), int32(2))
 }
 
-func TestServeDNSOverride(t *testing.T) {
+func TestServeDNSOverrideIPv4(t *testing.T) {
 	t.Parallel()
 	const hostname = "foo.com."
 	ip := net.ParseIP("1.2.3.4")
@@ -217,7 +217,7 @@ func TestServeDNSOverride(t *testing.T) {
 	a.Overrides.Store(Overrides{hostname: ip})
 	req := new(dns.Msg)
 	req.Opcode = dns.OpcodeQuery
-	req.Question = []dns.Question{{Name: hostname}}
+	req.Question = []dns.Question{{Name: hostname, Qtype: qtypeIPv4}}
 	var w fDNSResponseWriter
 	a.ServeDNS(&w, req)
 	ensure.DeepEqual(t, w.msg.Answer, []dns.RR{
@@ -232,6 +232,19 @@ func TestServeDNSOverride(t *testing.T) {
 			},
 		},
 	})
+}
+
+func TestServeDNSOverrideIPv6(t *testing.T) {
+	t.Parallel()
+	const hostname = "foo.com."
+	var a App
+	a.Overrides.Store(Overrides{hostname: net.ParseIP("1.2.3.4")})
+	req := new(dns.Msg)
+	req.Opcode = dns.OpcodeQuery
+	req.Question = []dns.Question{{Name: hostname, Qtype: qtypeIPv6}}
+	var w fDNSResponseWriter
+	a.ServeDNS(&w, req)
+	ensure.DeepEqual(t, len(w.msg.Answer), 0)
 }
 
 func TestServeDNSForwardNonOverrideQuery(t *testing.T) {
