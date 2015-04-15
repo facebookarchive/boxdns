@@ -26,7 +26,13 @@ const (
 
 // Overrides specify the custom hostname => IP address our DNS server will
 // override.
-type Overrides map[string]net.IP
+type Overrides map[string]Host
+
+// Host is the per host override entries.
+type Host struct {
+	IPv4 net.IP
+	IPv6 net.IP
+}
 
 // DNSClient allows us to forward unhandled DNS queries.
 type DNSClient interface {
@@ -123,15 +129,31 @@ func (a *App) rebuild() error {
 						return stackerr.Wrap(err)
 					}
 				}
-				ip := net.ParseIP(ci.NetworkSettings.IpAddress)
-				if ip == nil {
-					return stackerr.Newf(
-						"invalid IP address from docker %q for %q",
-						ci.NetworkSettings.IpAddress,
-						name,
-					)
+
+				var h Host
+				if ci.NetworkSettings.IpAddress != "" {
+					ip := net.ParseIP(ci.NetworkSettings.IpAddress)
+					if ip == nil {
+						return stackerr.Newf(
+							"invalid IP address from docker %q for %q",
+							ci.NetworkSettings.IpAddress,
+							name,
+						)
+					}
+					h.IPv4 = ip
 				}
-				overrides[strings.TrimPrefix(name, a.Prefix)+a.Domain+"."] = ip
+				if ci.NetworkSettings.GlobalIPv6Address != "" {
+					ip := net.ParseIP(ci.NetworkSettings.GlobalIPv6Address)
+					if ip == nil {
+						return stackerr.Newf(
+							"invalid IP address from docker %q for %q",
+							ci.NetworkSettings.GlobalIPv6Address,
+							name,
+						)
+					}
+					h.IPv6 = ip
+				}
+				overrides[strings.TrimPrefix(name, a.Prefix)+a.Domain+"."] = h
 			}
 		}
 	}
@@ -161,20 +183,25 @@ func (a *App) handleDNSQuery(w dns.ResponseWriter, req *dns.Msg) {
 	if len(req.Question) == 1 {
 		o := a.Overrides.Load().(Overrides)
 		q := req.Question[0]
-		if ip := o[q.Name]; ip != nil {
+		if h, ok := o[q.Name]; ok {
 			switch q.Qtype {
 			default:
 				a.Log.Printf("unhandled Qtype %d for overridden host %q\n", q.Qtype, q.Name)
 			case qtypeIPv4:
+				if h.IPv4 == nil {
+					a.writeNotFoundResponse(w, req)
+					return
+				}
+
 				res := new(dns.Msg)
 				res.SetReply(req)
 				res.RecursionAvailable = true
 				res.Answer = []dns.RR{
 					&dns.A{
-						A: ip,
+						A: h.IPv4,
 						Hdr: dns.RR_Header{
 							Name:     q.Name,
-							Rrtype:   1,
+							Rrtype:   qtypeIPv4,
 							Class:    1,
 							Ttl:      100,
 							Rdlength: 4,
@@ -184,15 +211,40 @@ func (a *App) handleDNSQuery(w dns.ResponseWriter, req *dns.Msg) {
 				w.WriteMsg(res)
 				return
 			case qtypeIPv6:
+				if h.IPv6 == nil {
+					a.writeNotFoundResponse(w, req)
+					return
+				}
+
 				res := new(dns.Msg)
 				res.SetReply(req)
 				res.RecursionAvailable = true
+				res.Answer = []dns.RR{
+					&dns.AAAA{
+						AAAA: h.IPv6,
+						Hdr: dns.RR_Header{
+							Name:     q.Name,
+							Rrtype:   qtypeIPv6,
+							Class:    1,
+							Ttl:      100,
+							Rdlength: 16,
+						},
+					},
+				}
 				w.WriteMsg(res)
 				return
 			}
 		}
 	}
 	a.forwardDNSRequest(w, req)
+}
+
+func (a *App) writeNotFoundResponse(w dns.ResponseWriter, req *dns.Msg) {
+	res := new(dns.Msg)
+	res.SetReply(req)
+	res.RecursionAvailable = true
+	res.Rcode = dns.RcodeNameError
+	w.WriteMsg(res)
 }
 
 func (a *App) forwardDNSRequest(w dns.ResponseWriter, req *dns.Msg) {

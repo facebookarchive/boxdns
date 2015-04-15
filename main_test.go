@@ -61,7 +61,8 @@ func TestRebuildPrefixDomain(t *testing.T) {
 	const (
 		prefix = "/p-"
 		name   = "foo"
-		ip     = "1.2.3.4"
+		ipv4   = "1.2.3.4"
+		ipv6   = "::1"
 	)
 	a := App{
 		Prefix: prefix,
@@ -77,14 +78,18 @@ func TestRebuildPrefixDomain(t *testing.T) {
 			},
 			inspectContainer: func(string) (*dockerclient.ContainerInfo, error) {
 				var ci dockerclient.ContainerInfo
-				ci.NetworkSettings.IpAddress = ip
+				ci.NetworkSettings.IpAddress = ipv4
+				ci.NetworkSettings.GlobalIPv6Address = ipv6
 				return &ci, nil
 			},
 		},
 	}
 	ensure.Nil(t, a.rebuild())
 	ensure.DeepEqual(t, a.Overrides.Load(), Overrides{
-		name + a.Domain + ".": net.ParseIP(ip),
+		name + a.Domain + ".": Host{
+			IPv4: net.ParseIP(ipv4),
+			IPv6: net.ParseIP(ipv6),
+		},
 	})
 }
 
@@ -122,7 +127,7 @@ func TestRebuildInspectError(t *testing.T) {
 	ensure.Err(t, a.rebuild(), regexp.MustCompile(errMsg))
 }
 
-func TestRebuildInvalidIP(t *testing.T) {
+func TestRebuildInvalidIPv4(t *testing.T) {
 	t.Parallel()
 	a := App{
 		docker: fDockerClient{
@@ -137,6 +142,28 @@ func TestRebuildInvalidIP(t *testing.T) {
 			inspectContainer: func(string) (*dockerclient.ContainerInfo, error) {
 				var ci dockerclient.ContainerInfo
 				ci.NetworkSettings.IpAddress = "a"
+				return &ci, nil
+			},
+		},
+	}
+	ensure.Err(t, a.rebuild(), regexp.MustCompile("invalid IP"))
+}
+
+func TestRebuildInvalidIPv6(t *testing.T) {
+	t.Parallel()
+	a := App{
+		docker: fDockerClient{
+			listContainers: func(bool, bool, string) ([]dockerclient.Container, error) {
+				return []dockerclient.Container{
+					{
+						Id:    "xyz",
+						Names: []string{"foo"},
+					},
+				}, nil
+			},
+			inspectContainer: func(string) (*dockerclient.ContainerInfo, error) {
+				var ci dockerclient.ContainerInfo
+				ci.NetworkSettings.GlobalIPv6Address = "a"
 				return &ci, nil
 			},
 		},
@@ -214,7 +241,7 @@ func TestServeDNSOverrideIPv4(t *testing.T) {
 	const hostname = "foo.com."
 	ip := net.ParseIP("1.2.3.4")
 	var a App
-	a.Overrides.Store(Overrides{hostname: ip})
+	a.Overrides.Store(Overrides{hostname: Host{IPv4: ip}})
 	req := new(dns.Msg)
 	req.Opcode = dns.OpcodeQuery
 	req.Question = []dns.Question{{Name: hostname, Qtype: qtypeIPv4}}
@@ -225,7 +252,7 @@ func TestServeDNSOverrideIPv4(t *testing.T) {
 			A: ip,
 			Hdr: dns.RR_Header{
 				Name:     hostname,
-				Rrtype:   1,
+				Rrtype:   qtypeIPv4,
 				Class:    1,
 				Ttl:      100,
 				Rdlength: 4,
@@ -237,11 +264,49 @@ func TestServeDNSOverrideIPv4(t *testing.T) {
 func TestServeDNSOverrideIPv6(t *testing.T) {
 	t.Parallel()
 	const hostname = "foo.com."
+	ip := net.ParseIP("::1")
 	var a App
-	a.Overrides.Store(Overrides{hostname: net.ParseIP("1.2.3.4")})
+	a.Overrides.Store(Overrides{hostname: Host{IPv6: ip}})
 	req := new(dns.Msg)
 	req.Opcode = dns.OpcodeQuery
 	req.Question = []dns.Question{{Name: hostname, Qtype: qtypeIPv6}}
+	var w fDNSResponseWriter
+	a.ServeDNS(&w, req)
+	ensure.DeepEqual(t, w.msg.Answer, []dns.RR{
+		&dns.AAAA{
+			AAAA: ip,
+			Hdr: dns.RR_Header{
+				Name:     hostname,
+				Rrtype:   qtypeIPv6,
+				Class:    1,
+				Ttl:      100,
+				Rdlength: 16,
+			},
+		},
+	})
+}
+
+func TestServeDNSOverrideIPv6Missing(t *testing.T) {
+	t.Parallel()
+	const hostname = "foo.com."
+	var a App
+	a.Overrides.Store(Overrides{hostname: Host{IPv4: net.ParseIP("1.2.3.4")}})
+	req := new(dns.Msg)
+	req.Opcode = dns.OpcodeQuery
+	req.Question = []dns.Question{{Name: hostname, Qtype: qtypeIPv6}}
+	var w fDNSResponseWriter
+	a.ServeDNS(&w, req)
+	ensure.DeepEqual(t, len(w.msg.Answer), 0)
+}
+
+func TestServeDNSOverrideIPv4Missing(t *testing.T) {
+	t.Parallel()
+	const hostname = "foo.com."
+	var a App
+	a.Overrides.Store(Overrides{hostname: Host{IPv6: net.ParseIP("::1")}})
+	req := new(dns.Msg)
+	req.Opcode = dns.OpcodeQuery
+	req.Question = []dns.Question{{Name: hostname, Qtype: qtypeIPv4}}
 	var w fDNSResponseWriter
 	a.ServeDNS(&w, req)
 	ensure.DeepEqual(t, len(w.msg.Answer), 0)
