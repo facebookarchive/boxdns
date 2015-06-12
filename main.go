@@ -123,11 +123,11 @@ func (a *App) rebuild() error {
 						return stackerr.Wrap(err)
 					}
 				}
-				ip := net.ParseIP(ci.NetworkSettings.IpAddress)
+				ip := net.ParseIP(ci.NetworkSettings.IPAddress)
 				if ip == nil {
 					return stackerr.Newf(
 						"invalid IP address from docker %q for %q",
-						ci.NetworkSettings.IpAddress,
+						ci.NetworkSettings.IPAddress,
 						name,
 					)
 				}

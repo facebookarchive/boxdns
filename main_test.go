@@ -77,7 +77,7 @@ func TestRebuildPrefixDomain(t *testing.T) {
 			},
 			inspectContainer: func(string) (*dockerclient.ContainerInfo, error) {
 				var ci dockerclient.ContainerInfo
-				ci.NetworkSettings.IpAddress = ip
+				ci.NetworkSettings.IPAddress = ip
 				return &ci, nil
 			},
 		},
@@ -136,7 +136,7 @@ func TestRebuildInvalidIP(t *testing.T) {
 			},
 			inspectContainer: func(string) (*dockerclient.ContainerInfo, error) {
 				var ci dockerclient.ContainerInfo
-				ci.NetworkSettings.IpAddress = "a"
+				ci.NetworkSettings.IPAddress = "a"
 				return &ci, nil
 			},
 		},
